@@ -1,6 +1,38 @@
 # Change Log
 All notable changes to this project will be documented in this file.
 
+## v0.3.8 - 2016-07-11
+
+[Full Changelog](https://github.com/taskrabbit/makara/compare/v0.3.7...v0.3.8) 
+
+Changed
+- Rails 5.1 compatibility [#150](https://github.com/taskrabbit/makara/pull/150) Jeremy Daer
+- Minimize redundant context cache requests [#157](https://github.com/taskrabbit/makara/issues/157) Greg Patrick
+- thread-local cache for previous context stickiness [#158](https://github.com/taskrabbit/makara/issues/158)  Jeremy Daer
+- Configurable cookie options [#159](https://github.com/taskrabbit/makara/pull/159) Jeremy Daer
+- Test against Rails 5.x and Ruby 2.x [#160](https://github.com/taskrabbit/makara/pull/160) Jeremy Daer
+
+## v0.3.7 - 2016-09-22
+
+[Full Changelog](https://github.com/taskrabbit/makara/compare/v0.3.6...v0.3.7)
+
+Changed
+
+- Fix the hierarchy of the config file [#116](https://github.com/taskrabbit/makara/pull/116) Kevin Bacha
+- "Disable blacklist" parameter [#134](https://github.com/taskrabbit/makara/pull/134) Alex Tonkonozhenko
+- Fixes bug in `without_sticking` [#96](https://github.com/taskrabbit/makara/pull/96) Brian Leonard
+- Always stick inside transactions [#96](https://github.com/taskrabbit/makara/pull/96) Brian Leonard
+- Rails 5 support [#122](https://github.com/taskrabbit/makara/pull/122) Jonny McAllister
+
+## v0.3.6 - 2016-04-21
+
+[Full Changelog](https://github.com/taskrabbit/makara/compare/v0.3.5...v0.3.6)
+
+Changed
+
+- Allow different strategies such as `priority` and `round_robin` for pools [#105](https://github.com/taskrabbit/makara/pull/105) Brian Leonard
+
+
 ## v0.3.5 - 2016-01-08
 
 [Full Changelog](https://github.com/taskrabbit/makara/compare/v0.3.4.rc1...v0.3.5)

@@ -10,6 +10,8 @@ describe 'MakaraMysql2Adapter' do
     base
   }
 
+  let(:connection) { ActiveRecord::Base.connection }
+
   before :each do
     ActiveRecord::Base.clear_all_connections!
     change_context
@@ -18,50 +20,12 @@ describe 'MakaraMysql2Adapter' do
   context "unconnected" do
 
     it 'should allow a connection to be established' do
-      ActiveRecord::Base.establish_connection(config)
+      establish_connection(config)
       expect(ActiveRecord::Base.connection).to be_instance_of(ActiveRecord::ConnectionAdapters::MakaraMysql2Adapter)
     end
 
-    it 'should not blow up if a connection fails' do
-      wrong_config = config.deep_dup
-      wrong_config['makara']['connections'].select{|h| h['role'] == 'slave' }.each{|h| h['username'] = 'other'}
-
-      original_method = ActiveRecord::Base.method(:mysql2_connection)
-
-      allow(ActiveRecord::Base).to receive(:mysql2_connection) do |config|
-        if config[:username] == 'other'
-          raise "could not connect"
-        else
-          original_method.call(config)
-        end
-      end
-
-      ActiveRecord::Base.establish_connection(wrong_config)
-      ActiveRecord::Base.connection
-
-      load(File.dirname(__FILE__) + '/../../support/schema.rb')
-      Makara::Context.set_current Makara::Context.generate
-
-      allow(ActiveRecord::Base).to receive(:mysql2_connection) do |config|
-        config[:username] = db_username
-        original_method.call(config)
-      end
-
-      ActiveRecord::Base.connection.slave_pool.connections.each(&:_makara_whitelist!)
-      ActiveRecord::Base.connection.slave_pool.provide do |con|
-        res = con.execute('SELECT count(*) FROM users')
-        if defined?(JRUBY_VERSION)
-          expect(res[0]).to eq('count(*)' => 0)
-        else
-          expect(res.to_a[0][0]).to eq(0)
-        end
-      end
-
-      ActiveRecord::Base.remove_connection
-    end
-
     it 'should execute a send_to_all against master even if no slaves are connected' do
-      ActiveRecord::Base.establish_connection(config)
+      establish_connection(config)
       connection = ActiveRecord::Base.connection
 
       connection.slave_pool.connections.each do |c|
@@ -80,7 +44,7 @@ describe 'MakaraMysql2Adapter' do
     end
 
     it 'should execute a send_to_all and raise a NoConnectionsAvailable error' do
-      ActiveRecord::Base.establish_connection(config)
+      establish_connection(config)
       connection = ActiveRecord::Base.connection
 
       (connection.slave_pool.connections | connection.master_pool.connections).each do |c|
@@ -95,14 +59,56 @@ describe 'MakaraMysql2Adapter' do
 
     end
 
+    context "unconnect afterwards" do
+      after :each do
+        ActiveRecord::Base.clear_all_connections!
+      end
+
+      it 'should not blow up if a connection fails' do
+        wrong_config = config.deep_dup
+        wrong_config['makara']['connections'].select{|h| h['role'] == 'slave' }.each{|h| h['username'] = 'other'}
+
+        original_method = ActiveRecord::Base.method(:mysql2_connection)
+
+        allow(ActiveRecord::Base).to receive(:mysql2_connection) do |config|
+          if config[:username] == 'other'
+            raise "could not connect"
+          else
+            original_method.call(config)
+          end
+        end
+
+        establish_connection(wrong_config)
+        ActiveRecord::Base.connection
+
+        load(File.dirname(__FILE__) + '/../../support/schema.rb')
+        Makara::Context.set_current Makara::Context.generate
+
+        allow(ActiveRecord::Base).to receive(:mysql2_connection) do |config|
+          config[:username] = db_username
+          original_method.call(config)
+        end
+
+        ActiveRecord::Base.connection.slave_pool.connections.each(&:_makara_whitelist!)
+        ActiveRecord::Base.connection.slave_pool.provide do |con|
+          res = con.execute('SELECT count(*) FROM users')
+          if defined?(JRUBY_VERSION)
+            expect(res[0]).to eq('count(*)' => 0)
+          else
+            expect(res.to_a[0][0]).to eq(0)
+          end
+        end
+
+        ActiveRecord::Base.remove_connection
+      end
+    end
+
   end
 
   context 'with the connection established and schema loaded' do
 
-    let(:connection) { ActiveRecord::Base.connection }
-
     before do
-      ActiveRecord::Base.establish_connection(config)
+      establish_connection(config)
       load(File.dirname(__FILE__) + '/../../support/schema.rb')
       change_context
     end
@@ -178,6 +184,62 @@ describe 'MakaraMysql2Adapter' do
       end
     end
 
+  end
+
+  describe 'transaction support' do
+    shared_examples 'a transaction supporter' do
+      before do
+        establish_connection(config)
+        load(File.dirname(__FILE__) + '/../../support/schema.rb')
+        change_context
+
+        connection.slave_pool.connections.each do |slave|
+          # Using method missing to help with back trace, literally
+          # no query should be executed on slave once a transaction is opened
+          expect(slave).to receive(:method_missing).never
+          expect(slave).to receive(:execute).never
+        end
+      end
+
+      context 'when querying through a polymorphic relation' do
+        it 'should respect the transaction' do
+          ActiveRecord::Base.transaction do
+            connection.execute("INSERT INTO users (name) VALUES ('John')")
+            connection.execute('SELECT * FROM users')
+          end
+        end
+      end
+
+      context 'when querying an aggregate' do
+        it 'should respect the transaction' do
+          ActiveRecord::Base.transaction { connection.execute('SELECT COUNT(*) FROM users') }
+        end
+      end
+
+      context 'when querying for a specific record' do
+        it 'should respect the transaction' do
+          ActiveRecord::Base.transaction { connection.execute('SELECT * FROM users WHERE id = 1') }
+        end
+      end
+
+      context 'when executing a query' do
+        it 'should respect the transaction' do
+          ActiveRecord::Base.transaction { connection.execute('SELECT 1') }
+        end
+      end
+    end
+
+    context 'when sticky is true' do
+      before { config['makara']['sticky'] = true }
+
+      it_behaves_like 'a transaction supporter'
+    end
+
+    context 'when sticky is false' do
+      before { config['makara']['sticky'] = false }
+
+      it_behaves_like 'a transaction supporter'
+    end
   end
 
 end

@@ -59,10 +59,13 @@ module Makara
     end
 
     def without_sticking
+      before_context = @master_context
+      @master_context = nil
       @skip_sticking = true
       yield
     ensure
       @skip_sticking = false
+      @master_context ||= before_context
     end
 
     def hijacked?
@@ -71,18 +74,26 @@ module Makara
 
     def stick_to_master!(write_to_cache = true)
       @master_context = Makara::Context.get_current
-      Makara::Cache.write("makara::#{@master_context}-#{@id}", '1', @ttl) if write_to_cache
+      Makara::Context.stick(@master_context, @id, @ttl) if write_to_cache
     end
 
     def strategy_for(role)
-      strategy_name = @config_parser.makara_config["#{role}_strategy".to_sym]
+      strategy_class_for(strategy_name_for(role)).new(self)
+    end
+
+    def strategy_name_for(role)
+      @config_parser.makara_config["#{role}_strategy".to_sym]
+    end
+
+    def strategy_class_for(strategy_name)
       case strategy_name
       when 'round_robin', 'roundrobin', nil, ''
-        strategy_name = "::Makara::Strategies::RoundRobin"
+        ::Makara::Strategies::RoundRobin
       when 'failover'
-        strategy_name = "::Makara::Strategies::PriorityFailover"
+        ::Makara::Strategies::PriorityFailover
+      else
+        strategy_name.constantize
       end
-      strategy_name.constantize.new(self)
     end
 
     def method_missing(m, *args, &block)
@@ -141,7 +152,7 @@ module Makara
       @master_pool.provide do |con|
         yield con
       end
-    rescue ::Makara::Errors::AllConnectionsBlacklisted, ::Makara::Errors::NoConnectionsAvailable => e
+    rescue ::Makara::Errors::AllConnectionsBlacklisted, ::Makara::Errors::NoConnectionsAvailable
       begin
         @master_pool.disabled = true
         @slave_pool.provide do |con|
@@ -195,7 +206,6 @@ module Makara
       elsif Makara::Context.get_current == @master_context
         @master_pool
 
-      # the previous context stuck us to master
       elsif previously_stuck_to_master?
 
         # we're only on master because of the previous context so
@@ -206,6 +216,9 @@ module Makara
       # all slaves are down (or empty)
       elsif @slave_pool.completely_blacklisted?
         stick_to_master(method_name, args)
+        @master_pool
+
+      elsif in_transaction?
         @master_pool
 
       # yay! use a slave
@@ -219,6 +232,13 @@ module Makara
       true
     end
 
+    def in_transaction?
+      if respond_to?(:open_transactions)
+        self.open_transactions > 0
+      else
+        false
+      end
+    end
 
     def hijacked
       @hijacked = true
@@ -229,8 +249,7 @@ module Makara
 
 
     def previously_stuck_to_master?
-      return false unless @sticky
-      !!Makara::Cache.read("makara::#{Makara::Context.get_previous}-#{@id}")
+      @sticky && Makara::Context.previously_stuck?(@id)
     end
 
 
@@ -256,14 +275,14 @@ module Makara
     def instantiate_connections
       @master_pool = Makara::Pool.new('master', self)
       @config_parser.master_configs.each do |master_config|
-        @master_pool.add master_config.merge(@config_parser.makara_config) do
+        @master_pool.add master_config do
           graceful_connection_for(master_config)
         end
       end
 
       @slave_pool = Makara::Pool.new('slave', self)
       @config_parser.slave_configs.each do |slave_config|
-        @slave_pool.add slave_config.merge(@config_parser.makara_config) do
+        @slave_pool.add slave_config do
           graceful_connection_for(slave_config)
         end
       end

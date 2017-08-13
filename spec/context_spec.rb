@@ -101,7 +101,46 @@ describe Makara::Context do
       threads.map(&:join)
       expect(uniq_curret_contexts.uniq.count).to eq(3)
     end
+
+    it 'clears config sticky cache' do
+      Makara::Cache.store = :memory
+
+      Makara::Context.set_previous('a')
+      Makara::Context.stick('a', 1, 10)
+      expect(Makara::Context.previously_stuck?(1)).to be_truthy
+
+      Makara::Context.set_previous('b')
+      expect(Makara::Context.previously_stuck?(1)).to be_falsey
+    end
   end
 
+  describe 'stick' do
+    it 'sticks a config to master for subsequent requests' do
+      Makara::Cache.store = :memory
+
+      expect(Makara::Context.stuck?('context', 1)).to be_falsey
+
+      Makara::Context.stick('context', 1, 10)
+      expect(Makara::Context.stuck?('context', 1)).to be_truthy
+      expect(Makara::Context.stuck?('context', 2)).to be_falsey
+    end
+  end
+
+  describe 'previously_stuck?' do
+    it 'checks whether a config was stuck to master in the previous context' do
+      Makara::Cache.store = :memory
+      Makara::Context.set_previous 'previous'
+
+      # Emulate sticking the previous web request to master.
+      Makara::Context.stick 'previous', 1, 10
+
+      # Emulate handling the subsequent web request with a previous context
+      # cookie that is stuck to master.
+      expect(Makara::Context.previously_stuck?(1)).to be_truthy
+
+      # Other configs should not be stuck to master, though.
+      expect(Makara::Context.previously_stuck?(2)).to be_falsey
+    end
+  end
 end
 

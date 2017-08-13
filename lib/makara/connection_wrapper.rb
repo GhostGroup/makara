@@ -37,14 +37,14 @@ module Makara
 
     # has this node been blacklisted?
     def _makara_blacklisted?
-      @blacklisted_until.to_i > Time.now.to_i
+      @blacklisted_until.present? && @blacklisted_until.to_i > Time.now.to_i
     end
 
     # blacklist this node for @config[:blacklist_duration] seconds
     def _makara_blacklist!
       @connection.disconnect! if @connection
       @connection = nil
-      @blacklisted_until = Time.now.to_i + @config[:blacklist_duration]
+      @blacklisted_until = Time.now.to_i + @config[:blacklist_duration] unless @config[:disable_blacklist]
     end
 
     # release the blacklist

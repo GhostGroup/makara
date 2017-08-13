@@ -13,32 +13,69 @@ module Makara
       end
 
       def get_previous
-        get_current_thread_local_for(:makara_context_previous)
+        fetch(:makara_context_previous) { generate }
       end
 
       def set_previous(context)
-        set_current_thread_local(:makara_context_previous,context)
+        previously_sticky.clear
+        set(:makara_context_previous,context)
       end
 
       def get_current
-        get_current_thread_local_for(:makara_context_current)
+        fetch(:makara_context_current) { generate }
       end
 
       def set_current(context)
-        set_current_thread_local(:makara_context_current,context)
+        set(:makara_context_current,context)
+      end
+
+      def previously_stuck?(config_id)
+        previously_sticky.fetch(config_id) do
+          stuck?(Makara::Context.get_previous, config_id)
+        end
+      end
+
+      # Called by `Proxy#stick_to_master!` to stick subsequent requests to
+      # master. They'll see the current context as their previous context
+      # when they're asking whether they should be stuck to master.
+      def stick(context, config_id, ttl)
+        Makara::Cache.write(cache_key_for(context, config_id), '1', ttl)
+      end
+
+      def stuck?(context, config_id)
+        !!Makara::Cache.read(cache_key_for(context, config_id))
       end
 
       protected
 
-      def get_current_thread_local_for(type)
-        t = Thread.current
-        current = t.respond_to?(:thread_variable_get) ? t.thread_variable_get(type) : t[type]
-        current ||= set_current_thread_local(type,generate)
+      def previously_sticky
+        fetch(:makara_previously_sticky) { Hash.new }
       end
 
-      def set_current_thread_local(type,context)
-        t = Thread.current
-        t.respond_to?(:thread_variable_set) ? t.thread_variable_set(type,context) : t[type]=context
+      def cache_key_for(context, config_id)
+        "makara::#{context}-#{config_id}"
+      end
+
+      def fetch(key)
+        get(key) || set(key,yield)
+      end
+
+      if Thread.current.respond_to?(:thread_variable_get)
+        def get(key)
+          Thread.current.thread_variable_get(key)
+        end
+
+        def set(key,value)
+          Thread.current.thread_variable_set(key,value)
+        end
+      else
+        def get(key)
+          Thread.current[key]
+        end
+
+        def set(key,value)
+          Thread.current[key]=value
+        end
       end
 
     end
